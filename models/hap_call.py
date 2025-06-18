@@ -1,18 +1,40 @@
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+# Detect device
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+# Load IBM Granite HAP model
 model_name_or_path = 'ibm-granite/granite-guardian-hap-125m'
 model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path)
 tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
 model.to(device)
 
-def invoke_hap(ip):
-    if not isinstance(ip, list):
-        ip = [ip]
-    i = tokenizer(ip, padding=True, truncation=True, return_tensors="pt").to(device)
+def invoke_hap(texts, threshold=0.5):
+    """
+    Evaluate harmfulness using Granite HAP model.
+
+    Returns:
+        List[Dict] → Each dict contains:
+        {
+            "score": float,
+            "unsafe": bool
+        }
+    """
+    if not isinstance(texts, list):
+        texts = [texts]
+
+    inputs = tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(device)
+    
     with torch.no_grad():
-        logits = model(**i).logits
-        prediction = torch.argmax(logits, dim=1).cpu().detach().numpy().tolist() 
-        probabilities = torch.softmax(logits, dim=1).cpu().detach().numpy()[:,1].tolist()
-    return probabilities
+        logits = model(**inputs).logits
+        probs = torch.softmax(logits, dim=1).cpu().numpy()[:, 1]  # class 1 = harmful
+
+    results = []
+    for score in probs:
+        results.append({
+            "score": round(float(score), 6),
+            "unsafe": bool(score > threshold)
+        })
+
+    return results
